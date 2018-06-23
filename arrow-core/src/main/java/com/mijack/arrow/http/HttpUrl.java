@@ -21,12 +21,18 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.mijack.arrow.Utils;
+
+import com.google.common.collect.Lists;
+
 /**
  * @author Mi&Jack
  * @since 2018/6/23
  */
 public class HttpUrl {
 
+    private static final List<String> SUPPORT_SCHEMAS =
+            Lists.newArrayList("http://", "https://", "ftp://");
     final String scheme;
 
     private final String username;
@@ -56,6 +62,57 @@ public class HttpUrl {
         this.url = builder.toString();
     }
 
+    public static HttpUrl parse(String url) {
+        HttpUrl.Builder builder = new Builder();
+        int i = Utils.startWith(url, SUPPORT_SCHEMAS);
+        Utils.checkTrue(i >= 0, "未找到支持的协议");
+        int offsite = 0;
+        String scheme = SUPPORT_SCHEMAS.get(i);
+        builder.scheme(scheme.substring(0, scheme.length() - 3));
+        offsite += scheme.length();
+        int hostEnd = Utils.indexCharOf(url, "/?#", offsite);
+        String optionPart = hostEnd > 0 ? url.substring(hostEnd) : null;
+        String mainPart = hostEnd > 0 ? url.substring(offsite, hostEnd) : url.substring(offsite);
+        int indexCharOf = Utils.indexCharOf(mainPart, "@");
+        if (indexCharOf > 0) {
+            String usernameAndPassword = mainPart.substring(0, indexCharOf);
+            int indexOf1 = usernameAndPassword.indexOf(":");
+            if (indexOf1 > 0) {
+                builder.username(usernameAndPassword.substring(0, indexOf1))
+                        .password(usernameAndPassword.substring(indexOf1 + 1));
+            } else {
+                builder.username(usernameAndPassword);
+            }
+        }
+        String mainHost = indexCharOf > 0 ? mainPart.substring(indexCharOf + 1) : mainPart;
+        int hostIndex = mainHost.indexOf(":");
+        if (hostIndex > 0) {
+            builder.host(mainHost.substring(0, hostIndex))
+                    .port(Integer.parseInt(mainHost.substring(hostIndex + 1)));
+        } else {
+            builder.host(mainHost);
+        }
+        if (optionPart != null) {
+            offsite = Utils.indexCharOf(optionPart, "?#");
+            if (offsite > 0) {
+                builder.addPathSegments(optionPart.substring(0, offsite));
+            } else if (offsite < 0) {
+                builder.addPathSegments(optionPart);
+            }
+            int offsiteEnd = Utils.indexCharOf(optionPart, "#");
+            // query
+            if (offsite != offsiteEnd) {
+                offsiteEnd = offsiteEnd == -1 ? optionPart.length() : offsiteEnd;
+                String query = optionPart.substring(offsite + 1, offsiteEnd);
+                builder.query(query);
+            }
+            if (offsiteEnd >= 0 && offsiteEnd < optionPart.length()) {
+                builder.fragment(optionPart.substring(offsiteEnd + 1));
+            }
+        }
+        return builder.build();
+    }
+
 
     /**
      * Returns this URL as a {@link URL java.net.URL}.
@@ -66,6 +123,11 @@ public class HttpUrl {
         } catch (MalformedURLException e) {
             throw new RuntimeException(e); // Unexpected!
         }
+    }
+
+    @Override
+    public String toString() {
+        return url;
     }
 
     public Builder builder() {
@@ -130,23 +192,23 @@ public class HttpUrl {
             return this;
         }
 
-        /**
-         * Adds a set of path segments separated by a slash (either {@code \} or {@code /}). If
-         * {@code pathSegments} starts with a slash, the resulting URL will have empty path segment.
-         */
         public Builder addPathSegments(String pathSegments) {
             if (pathSegments == null) throw new NullPointerException("pathSegments == null");
-            return addPathSegments(pathSegments, false);
-        }
-
-
-        private Builder addPathSegments(String pathSegments, boolean alreadyEncoded) {
             int offset = 0;
             do {
-                int segmentEnd = pathSegments.indexOf('/', offset);
-                addPathSegment(pathSegments.substring(offset, segmentEnd));
-                offset = segmentEnd + 1;
-            } while (offset <= pathSegments.length());
+                int segmentEnd = pathSegments.indexOf('/', offset + 1);
+                if (segmentEnd < 0) {
+                    segmentEnd = pathSegments.indexOf('?', offset + 1);
+                }
+                if (segmentEnd < 0) {
+                    segmentEnd = pathSegments.indexOf('#', offset + 1);
+                }
+                if (segmentEnd < 0) {
+                    segmentEnd = pathSegments.length();
+                }
+                addPathSegment(pathSegments.substring(offset + 1, segmentEnd));
+                offset = segmentEnd;
+            } while (offset < pathSegments.length());
             return this;
         }
 
@@ -180,6 +242,18 @@ public class HttpUrl {
                 list.add(queryData[1]);
             }
             return list;
+        }
+
+
+        public Builder addQueryParameters(String querys) {
+            if (querys == null) throw new NullPointerException("querys == null");
+            if (queryNamesAndValues == null) queryNamesAndValues = new ArrayList<>();
+            String[] split = querys.split("&");
+            for (String s: split) {
+                String[] strings = s.split("=");
+                addQueryParameter(strings[0], strings[1]);
+            }
+            return this;
         }
 
         public Builder addQueryParameter(String name, String value) {
@@ -285,6 +359,5 @@ public class HttpUrl {
                 result.append("/").append(path);
             }
         }
-
     }
 }
